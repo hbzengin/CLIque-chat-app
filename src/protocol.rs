@@ -1,46 +1,25 @@
-use std::io;
-
 use serde::{Deserialize, Serialize};
 use serde_json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
-#[repr(u8)]
-enum MessageType {
-    CreateChatRequest = 1,
-    CreateChatResponse = 2,
-    JoinChatRequest = 3,
-    JoinChatResponse = 4,
-    SendMessageRequest = 5,
-    SendMessageResponse = 6,
-    LeaveChatRequest = 7,
-    LeaveChatResponse = 8,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ErrorResponse {
+    pub code: ErrorCode,
+    pub message: String,
 }
 
-impl TryFrom<u8> for MessageType {
-    type Error = io::Error;
-
-    fn try_from(n: u8) -> Result<Self, Self::Error> {
-        use self::MessageType::*;
-        match n {
-            1 => Ok(CreateChatRequest),
-            2 => Ok(CreateChatResponse),
-            3 => Ok(JoinChatRequest),
-            4 => Ok(JoinChatResponse),
-            5 => Ok(SendMessageRequest),
-            6 => Ok(SendMessageResponse),
-            7 => Ok(LeaveChatRequest),
-            8 => Ok(LeaveChatResponse),
-            other => Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Message type now known {other}"),
-            )),
-        }
-    }
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorCode {
+    WrongPassword,
+    ChatNotFound,
+    InvalidFormat,
+    Unauthorized,
+    InternalError,
 }
 
 // Header shared by all
-
 // 1+4 = 5 bytes total
 struct Header {
     version: u8,
@@ -55,13 +34,13 @@ impl From<[u8; 5]> for Header {
     }
 }
 
-struct Packet {
-    version: u8,
-    message: Message,
+pub struct Packet {
+    pub version: u8,
+    pub message: Message,
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type", content = "body")]
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "type", rename_all = "snake_case", content = "body")]
 pub enum Message {
     CreateChatRequest(CreateChatRequest),
     CreateChatResponse(CreateChatResponse),
@@ -70,51 +49,52 @@ pub enum Message {
     SendMessageRequest(SendMessageRequest),
     SendMessageResponse(SendMessageResponse),
     LeaveChatRequest(LeaveChatRequest),
-    LeaveChatRespon(LeaveChatResponse),
+    LeaveChatResponse(LeaveChatResponse),
+    ErrorResponse(ErrorResponse),
 }
 
 /* These are the actual bodies */
 
-#[derive(Serialize, Deserialize)]
-struct CreateChatRequest {
-    password: Option<String>,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CreateChatRequest {
+    pub password: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct CreateChatResponse {
-    chat_id: i32,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CreateChatResponse {
+    pub chat_id: Uuid,
 }
 
-#[derive(Serialize, Deserialize)]
-struct JoinChatRequest {
-    chat_id: i32,
-    username: String,
-    password: Option<String>,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct JoinChatRequest {
+    pub chat_id: Uuid,
+    pub username: String,
+    pub password: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct JoinChatResponse {
-    token: Uuid,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct JoinChatResponse {
+    pub token: Uuid,
 }
 
-#[derive(Serialize, Deserialize)]
-struct SendMessageRequest {
-    token: Uuid,
-    chat_id: i32,
-    message: String,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SendMessageRequest {
+    pub token: Uuid,
+    pub chat_id: Uuid,
+    pub message: String,
 }
 
-#[derive(Serialize, Deserialize)]
-struct SendMessageResponse {}
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SendMessageResponse {}
 
-#[derive(Serialize, Deserialize)]
-struct LeaveChatRequest {
-    token: Uuid,
-    chat_id: i32,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct LeaveChatRequest {
+    pub token: Uuid,
+    pub chat_id: Uuid,
 }
 
-#[derive(Serialize, Deserialize)]
-struct LeaveChatResponse {}
+#[derive(Serialize, Deserialize, Debug)]
+pub struct LeaveChatResponse {}
 
 pub async fn read_message<R: AsyncReadExt + Unpin>(
     src: &mut R,
