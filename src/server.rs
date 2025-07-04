@@ -3,16 +3,24 @@ use argon2::{
     Argon2, PasswordHasher, PasswordVerifier,
 };
 
-use std::{collections::HashMap, io::ErrorKind, sync::Arc};
-use tokio::{net::TcpListener, sync::Mutex};
+use std::{
+    collections::{HashMap, HashSet},
+    io::ErrorKind,
+    sync::Arc,
+};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::Mutex,
+};
 
 use crate::protocol::{
     read_message, write_message, CreateChatResponse, ErrorCode, ErrorResponse, JoinChatResponse,
-    Message::*, Packet,
+    LeaveChatResponse, Packet,
+    ProtocolMessage::{self, *},
+    SendMessageResponse,
 };
 
 use rand::rngs::OsRng;
-
 use uuid::Uuid;
 
 fn gen_chat_id() -> Uuid {
@@ -31,15 +39,70 @@ fn verify_password(password: &str, stored: &str) -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
+struct ChatMessage {
+    username: String,
+    message: String,
+}
+
 struct ChatRoom {
-    users: Vec<String>,
+    tokens: HashMap<Uuid, String>, // token to username
+    users: HashSet<String>,
     password: Option<String>,
-    messages: Vec<String>,
+    messages: Vec<ChatMessage>,
+}
+
+impl ChatRoom {
+    fn join(&mut self, username: String, password: Option<String>) -> Result<Uuid, ErrorResponse> {
+        if self.users.contains(&username) {
+            return Err(ErrorResponse {
+                code: ErrorCode::UserAlreadyInRoom,
+                message: "User already in room!".into(),
+            });
+        }
+
+        if let Some(room_pw_hash) = &self.password {
+            let pw = password.ok_or_else(|| ErrorResponse {
+                code: ErrorCode::PasswordMissing,
+                message: "Password missing".into(),
+            })?;
+
+            verify_password(&pw, room_pw_hash).map_err(|_| ErrorResponse {
+                code: ErrorCode::WrongPassword,
+                message: "Wrong password".into(),
+            })?;
+        }
+
+        let token = Uuid::new_v4();
+        self.tokens.insert(token, username.clone());
+        self.users.insert(username);
+        Ok(token)
+    }
+
+    fn add_message(&mut self, token: Uuid, message: String) -> Result<(), ErrorResponse> {
+        let username = self.tokens.get(&token).ok_or_else(|| ErrorResponse {
+            code: ErrorCode::Unauthorized,
+            message: "User does not exist in the room".into(),
+        })?;
+        self.messages.push(ChatMessage {
+            username: username.into(),
+            message: message,
+        });
+        Ok(())
+    }
+
+    fn leave(&mut self, token: Uuid) -> Result<(), ErrorResponse> {
+        let username = self.tokens.get(&token).ok_or_else(|| ErrorResponse {
+            code: ErrorCode::Unauthorized,
+            message: "User does not exist in the room".into(),
+        })?;
+        self.users.remove(username);
+        self.tokens.remove(&token);
+        Ok(())
+    }
 }
 
 pub struct ChatServer {
     port: i32,
-    tokens: HashMap<Uuid, String>,  // token to username
     chats: HashMap<Uuid, ChatRoom>, // ChatId to Chat
 }
 
@@ -47,7 +110,6 @@ impl ChatServer {
     pub fn new(port: i32) -> Self {
         ChatServer {
             port,
-            tokens: HashMap::new(),
             chats: HashMap::new(),
         }
     }
@@ -84,83 +146,112 @@ async fn handle_connection(
             Ok(pkt) => pkt,
         };
 
-        let response = {
-            let mut server = state.lock().await;
+        let mut server = state.lock().await;
+        match message {
+            CreateChatRequest(r) => {
+                let chat_id = gen_chat_id();
+                let hashed_pw = match r.password {
+                    Some(pw) => Some(hash_password(pw)?),
+                    None => None,
+                };
 
-            match message {
-                CreateChatRequest(r) => {
-                    let chat_id = gen_chat_id();
-                    let hashed_pw = match r.password {
-                        Some(pw) => Some(hash_password(pw)?),
-                        None => None,
-                    };
+                server.chats.insert(
+                    chat_id,
+                    ChatRoom {
+                        users: HashSet::new(),
+                        tokens: HashMap::new(),
+                        password: hashed_pw,
+                        messages: Vec::new(),
+                    },
+                );
+                send_response(
+                    &mut socket,
+                    CreateChatResponse(CreateChatResponse { chat_id }),
+                )
+                .await?;
+            }
+            JoinChatRequest(r) => {
+                // Room doesn't even exist
+                let Some(chat) = server.chats.get_mut(&r.chat_id) else {
+                    send_error(&mut socket, ErrorCode::ChatNotFound, "Chat not found").await?;
+                    continue;
+                };
 
-                    server.chats.insert(
-                        chat_id,
-                        ChatRoom {
-                            users: Vec::new(),
-                            password: hashed_pw,
-                            messages: Vec::new(),
-                        },
-                    );
-                    CreateChatResponse(CreateChatResponse { chat_id })
-                }
-                JoinChatRequest(r) => {
-                    // Room doesn't even exist
-                    if !server.chats.contains_key(&r.chat_id) {
-                        ErrorResponse(ErrorResponse {
-                            code: (ErrorCode::ChatNotFound),
-                            message: "Chat was not found".to_string(),
-                        })
-
-                    // Roome exists
-                    } else {
-                        let chat = server.chats.get(&r.chat_id).unwrap();
-                        // ChatRoom has a password
-                        if let Some(pw) = chat.password {
-                            // Request did not contain a password
-                            if r.password.is_none() {
-                                ErrorResponse(ErrorResponse {
-                                    code: (ErrorCode::PasswordMissing),
-                                    message: "Password Missing".to_string(),
-                                })
-
-                            // If request password does not matched (hashed) room password
-                            } else if verify_password(r.password.as_deref().unwrap(), &pw).is_err()
-                            {
-                                ErrorResponse(ErrorResponse {
-                                    code: (ErrorCode::WrongPassword),
-                                    message: "Wrong password".to_string(),
-                                })
-
-                            // Passwords match, correc user
-                            } else {
-                                let new_token = Uuid::new_v4();
-                                chat.users.insert(new_token, r.username);
-                                JoinChatResponse(JoinChatResponse { token: new_token })
-                            }
-                        // Room does not have a password so all good.
-                        } else {
-                            let new_token = Uuid::new_v4();
-                            JoinChatResponse(JoinChatResponse { token: new_token })
-                        }
+                match chat.join(r.username, r.password) {
+                    Ok(token) => {
+                        send_response(&mut socket, JoinChatResponse(JoinChatResponse { token }))
+                            .await?;
+                    }
+                    Err(err) => {
+                        send_error(&mut socket, err.code, &err.message).await?;
                     }
                 }
-                SendMessageRequest(r) => todo!(),
-                LeaveChatRequest(r) => todo!(),
-                other => {
-                    return Err(Box::new(std::io::Error::new(
-                        ErrorKind::InvalidData,
-                        format!("Unexpected request: {:?}", other),
-                    )))
+            }
+            SendMessageRequest(r) => {
+                let Some(chat) = server.chats.get_mut(&r.chat_id) else {
+                    send_error(&mut socket, ErrorCode::ChatNotFound, "Chat not found").await?;
+                    continue;
+                };
+
+                match chat.add_message(r.token, r.message) {
+                    Ok(()) => {
+                        send_response(&mut socket, SendMessageResponse(SendMessageResponse {}))
+                            .await?;
+                    }
+                    Err(err) => {
+                        send_error(&mut socket, err.code, &err.message).await?;
+                    }
                 }
             }
-        };
+            LeaveChatRequest(r) => {
+                let Some(chat) = server.chats.get_mut(&r.chat_id) else {
+                    send_error(&mut socket, ErrorCode::ChatNotFound, "Chat not found").await?;
+                    continue;
+                };
 
-        let reply = Packet {
-            version: 1,
-            message: response,
+                match chat.leave(r.token) {
+                    Ok(()) => {
+                        send_response(&mut socket, LeaveChatResponse(LeaveChatResponse {})).await?;
+                    }
+                    Err(err) => {
+                        send_error(&mut socket, err.code, &err.message).await?;
+                    }
+                }
+            }
+            other => {
+                return Err(Box::new(std::io::Error::new(
+                    ErrorKind::InvalidData,
+                    format!("Unexpected request: {:?}", other),
+                )))
+            }
         };
-        write_message(&mut socket, &reply).await?
     }
+}
+
+async fn send_error(
+    sock: &mut TcpStream,
+    code: ErrorCode,
+    msg: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pkt = Packet {
+        version: 1,
+        message: ErrorResponse(ErrorResponse {
+            code,
+            message: msg.into(),
+        }),
+    };
+    write_message(sock, &pkt).await?;
+    Ok(())
+}
+
+async fn send_response(
+    sock: &mut TcpStream,
+    m: ProtocolMessage,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pkt = Packet {
+        version: 1,
+        message: m,
+    };
+    write_message(sock, &pkt).await?;
+    Ok(())
 }

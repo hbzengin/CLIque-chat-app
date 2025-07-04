@@ -18,6 +18,7 @@ pub enum ErrorCode {
     InvalidFormat,
     Unauthorized,
     InternalError,
+    UserAlreadyInRoom,
 }
 
 // Header shared by all
@@ -37,12 +38,12 @@ impl From<[u8; 5]> for Header {
 
 pub struct Packet {
     pub version: u8,
-    pub message: Message,
+    pub message: ProtocolMessage,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case", content = "body")]
-pub enum Message {
+pub enum ProtocolMessage {
     CreateChatRequest(CreateChatRequest),
     CreateChatResponse(CreateChatResponse),
     JoinChatRequest(JoinChatRequest),
@@ -106,7 +107,7 @@ pub async fn read_message<R: AsyncReadExt + Unpin>(
     let header = Header::from(header_bytes);
     let mut message_bytes = vec![0u8; header.length as usize];
     src.read_exact(&mut message_bytes).await?;
-    let message: Message = serde_json::from_slice(&message_bytes)?;
+    let message: ProtocolMessage = serde_json::from_slice(&message_bytes)?;
 
     Ok(Packet {
         version: header.version,
