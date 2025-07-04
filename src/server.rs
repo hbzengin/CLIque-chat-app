@@ -6,7 +6,10 @@ use argon2::{
 use std::{collections::HashMap, io::ErrorKind, sync::Arc};
 use tokio::{net::TcpListener, sync::Mutex};
 
-use crate::protocol::{read_message, write_message, CreateChatResponse, Message::*, Packet};
+use crate::protocol::{
+    read_message, write_message, CreateChatResponse, ErrorCode, ErrorResponse, JoinChatResponse,
+    Message::*, Packet,
+};
 
 use rand::rngs::OsRng;
 
@@ -36,8 +39,8 @@ struct ChatRoom {
 
 pub struct ChatServer {
     port: i32,
-    tokens: HashMap<String, String>, // token to username
-    chats: HashMap<Uuid, ChatRoom>,  // ChatId to Chat
+    tokens: HashMap<Uuid, String>,  // token to username
+    chats: HashMap<Uuid, ChatRoom>, // ChatId to Chat
 }
 
 impl ChatServer {
@@ -103,7 +106,45 @@ async fn handle_connection(
                     CreateChatResponse(CreateChatResponse { chat_id })
                 }
                 JoinChatRequest(r) => {
-                    // if !server.chats.contains_key(&r.chat_id) {}
+                    // Room doesn't even exist
+                    if !server.chats.contains_key(&r.chat_id) {
+                        ErrorResponse(ErrorResponse {
+                            code: (ErrorCode::ChatNotFound),
+                            message: "Chat was not found".to_string(),
+                        })
+
+                    // Roome exists
+                    } else {
+                        let chat = server.chats.get(&r.chat_id).unwrap();
+                        // ChatRoom has a password
+                        if let Some(pw) = chat.password {
+                            // Request did not contain a password
+                            if r.password.is_none() {
+                                ErrorResponse(ErrorResponse {
+                                    code: (ErrorCode::PasswordMissing),
+                                    message: "Password Missing".to_string(),
+                                })
+
+                            // If request password does not matched (hashed) room password
+                            } else if verify_password(r.password.as_deref().unwrap(), &pw).is_err()
+                            {
+                                ErrorResponse(ErrorResponse {
+                                    code: (ErrorCode::WrongPassword),
+                                    message: "Wrong password".to_string(),
+                                })
+
+                            // Passwords match, correc user
+                            } else {
+                                let new_token = Uuid::new_v4();
+                                chat.users.insert(new_token, r.username);
+                                JoinChatResponse(JoinChatResponse { token: new_token })
+                            }
+                        // Room does not have a password so all good.
+                        } else {
+                            let new_token = Uuid::new_v4();
+                            JoinChatResponse(JoinChatResponse { token: new_token })
+                        }
+                    }
                 }
                 SendMessageRequest(r) => todo!(),
                 LeaveChatRequest(r) => todo!(),

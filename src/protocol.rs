@@ -13,6 +13,7 @@ pub struct ErrorResponse {
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     WrongPassword,
+    PasswordMissing,
     ChatNotFound,
     InvalidFormat,
     Unauthorized,
