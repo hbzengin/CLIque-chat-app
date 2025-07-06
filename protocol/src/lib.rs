@@ -88,7 +88,9 @@ pub struct JoinChatRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct JoinChatResponse {
+    pub chat_id: Uuid,
     pub token: Uuid,
+    pub username: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -119,16 +121,10 @@ pub async fn read_message<R: AsyncReadExt + Unpin>(src: &mut R) -> Result<Packet
     src.read_exact(&mut message_bytes).await?;
     let message: ProtocolMessage = serde_json::from_slice(&message_bytes)?;
 
-    Ok(Packet {
-        version: header.version,
-        message,
-    })
+    Ok(Packet { version: header.version, message })
 }
 
-pub async fn write_message<W: AsyncWriteExt + Unpin>(
-    dst: &mut W,
-    packet: &Packet,
-) -> Result<(), DynError> {
+pub async fn write_message<W: AsyncWriteExt + Unpin>(dst: &mut W, packet: &Packet) -> Result<(), DynError> {
     let body = serde_json::to_vec(&packet.message)?;
 
     let len: u32 = body.len() as u32;

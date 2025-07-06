@@ -4,4 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+colored = "3.0.0"
 protocol = { path = "../protocol" }
+tokio = "1.46.1"
+uuid = "1.17.0"

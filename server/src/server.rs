@@ -14,8 +14,7 @@ use tokio::{
 };
 
 use crate::protocol::{
-    read_message, write_message, ChatMessage, CreateChatResponse, DynError, ErrorCode,
-    ErrorResponse, JoinChatResponse, LeaveChatResponse, Packet,
+    read_message, write_message, ChatMessage, CreateChatResponse, DynError, ErrorCode, ErrorResponse, JoinChatResponse, LeaveChatResponse, Packet,
     ProtocolMessage::{self, *},
     SendMessageResponse,
 };
@@ -51,37 +50,18 @@ impl ChatRoom {
     fn new(password: Option<String>) -> Self {
         let (broadcaster, _) = broadcast::channel(100);
 
-        ChatRoom {
-            tokens: HashMap::new(),
-            users: HashSet::new(),
-            password,
-            messages: Vec::new(),
-            broadcaster,
-        }
+        ChatRoom { tokens: HashMap::new(), users: HashSet::new(), password, messages: Vec::new(), broadcaster }
     }
 
-    fn join(
-        &mut self,
-        username: String,
-        password: Option<String>,
-    ) -> Result<(Uuid, broadcast::Receiver<ChatMessage>), ErrorResponse> {
+    fn join(&mut self, username: String, password: Option<String>) -> Result<(Uuid, broadcast::Receiver<ChatMessage>), ErrorResponse> {
         if self.users.contains(&username) {
-            return Err(ErrorResponse {
-                code: ErrorCode::UserAlreadyInRoom,
-                message: "User already in room!".into(),
-            });
+            return Err(ErrorResponse { code: ErrorCode::UserAlreadyInRoom, message: "User already in room!".into() });
         }
 
         if let Some(room_pw_hash) = &self.password {
-            let pw = password.ok_or_else(|| ErrorResponse {
-                code: ErrorCode::PasswordMissing,
-                message: "Password missing".into(),
-            })?;
+            let pw = password.ok_or_else(|| ErrorResponse { code: ErrorCode::PasswordMissing, message: "Password missing".into() })?;
 
-            verify_password(&pw, room_pw_hash).map_err(|_| ErrorResponse {
-                code: ErrorCode::WrongPassword,
-                message: "Wrong password".into(),
-            })?;
+            verify_password(&pw, room_pw_hash).map_err(|_| ErrorResponse { code: ErrorCode::WrongPassword, message: "Wrong password".into() })?;
         }
 
         let token = Uuid::new_v4();
@@ -93,28 +73,16 @@ impl ChatRoom {
     }
 
     fn add_message(&mut self, token: Uuid, message: String) -> Result<(), ErrorResponse> {
-        let username = self.tokens.get(&token).ok_or_else(|| ErrorResponse {
-            code: ErrorCode::Unauthorized,
-            message: "User does not exist in the room".into(),
-        })?;
-        self.messages.push(ChatMessage {
-            username: username.into(),
-            message: message.clone(),
-        });
+        let username = self.tokens.get(&token).ok_or_else(|| ErrorResponse { code: ErrorCode::Unauthorized, message: "User does not exist in the room".into() })?;
+        self.messages.push(ChatMessage { username: username.into(), message: message.clone() });
 
-        let _ = self.broadcaster.send(ChatMessage {
-            username: username.clone(),
-            message,
-        });
+        let _ = self.broadcaster.send(ChatMessage { username: username.clone(), message });
 
         Ok(())
     }
 
     fn leave(&mut self, token: Uuid) -> Result<(), ErrorResponse> {
-        let username = self.tokens.get(&token).ok_or_else(|| ErrorResponse {
-            code: ErrorCode::Unauthorized,
-            message: "User does not exist in the room".into(),
-        })?;
+        let username = self.tokens.get(&token).ok_or_else(|| ErrorResponse { code: ErrorCode::Unauthorized, message: "User does not exist in the room".into() })?;
         self.users.remove(username);
         self.tokens.remove(&token);
         Ok(())
@@ -128,10 +96,7 @@ pub struct ChatServer {
 
 impl ChatServer {
     pub fn new(port: i32) -> Self {
-        ChatServer {
-            port,
-            chats: HashMap::new(),
-        }
+        ChatServer { port, chats: HashMap::new() }
     }
 
     pub async fn run(self) -> Result<(), DynError> {
@@ -153,10 +118,7 @@ impl ChatServer {
     }
 }
 
-async fn handle_connection(
-    mut socket: tokio::net::TcpStream,
-    state: Arc<Mutex<ChatServer>>,
-) -> Result<(), DynError> {
+async fn handle_connection(mut socket: tokio::net::TcpStream, state: Arc<Mutex<ChatServer>>) -> Result<(), DynError> {
     let mut message_receiver: Option<broadcast::Receiver<ChatMessage>> = None;
     let mut current_chat_id: Option<Uuid> = None;
 
@@ -194,12 +156,11 @@ async fn handle_connection(
                             continue;
                         };
 
-                        match chat.join(r.username, r.password) {
+                        match chat.join(r.username.clone(), r.password) {
                             Ok((token, receiver)) => {
                                 message_receiver = Some(receiver);
                                 current_chat_id = Some(r.chat_id);
-                                send_response(&mut socket, JoinChatResponse(JoinChatResponse { token }))
-                                    .await?;
+                                send_response(&mut socket, JoinChatResponse(JoinChatResponse { chat_id: r.chat_id, token, username: r.username })).await?;
                             }
                             Err(err) => {
                                 send_error(&mut socket, err.code, &err.message).await?;
@@ -229,6 +190,7 @@ async fn handle_connection(
                         match chat.leave(r.token) {
                             Ok(()) => {
                                 message_receiver = None; // clear receiver when leaving?
+                                current_chat_id = None;
                                 send_response(&mut socket, LeaveChatResponse(LeaveChatResponse {})).await?;
                             }
                             Err(err) => {
@@ -264,22 +226,13 @@ async fn handle_connection(
 }
 
 async fn send_error(sock: &mut TcpStream, code: ErrorCode, msg: &str) -> Result<(), DynError> {
-    let pkt = Packet {
-        version: 1,
-        message: ErrorResponse(ErrorResponse {
-            code,
-            message: msg.into(),
-        }),
-    };
+    let pkt = Packet { version: 1, message: ErrorResponse(ErrorResponse { code, message: msg.into() }) };
     write_message(sock, &pkt).await?;
     Ok(())
 }
 
 async fn send_response(sock: &mut TcpStream, m: ProtocolMessage) -> Result<(), DynError> {
-    let pkt = Packet {
-        version: 1,
-        message: m,
-    };
+    let pkt = Packet { version: 1, message: m };
     write_message(sock, &pkt).await?;
     Ok(())
 }
