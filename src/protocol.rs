@@ -53,6 +53,15 @@ pub enum ProtocolMessage {
     LeaveChatRequest(LeaveChatRequest),
     LeaveChatResponse(LeaveChatResponse),
     ErrorResponse(ErrorResponse),
+
+    // across async handlers to broadcast messages
+    MessageBroadcast(ChatMessage),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ChatMessage {
+    pub username: String,
+    pub message: String,
 }
 
 /* These are the actual bodies */
@@ -100,7 +109,7 @@ pub struct LeaveChatResponse {}
 
 pub async fn read_message<R: AsyncReadExt + Unpin>(
     src: &mut R,
-) -> Result<Packet, Box<dyn std::error::Error>> {
+) -> Result<Packet, Box<dyn std::error::Error + Send + Sync>> {
     let mut header_bytes = [0u8; 5];
     src.read_exact(&mut header_bytes).await?;
 
@@ -118,7 +127,7 @@ pub async fn read_message<R: AsyncReadExt + Unpin>(
 pub async fn write_message<W: AsyncWriteExt + Unpin>(
     dst: &mut W,
     packet: &Packet,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let body = serde_json::to_vec(&packet.message)?;
 
     let len: u32 = body.len() as u32;
