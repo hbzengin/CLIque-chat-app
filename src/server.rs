@@ -43,7 +43,7 @@ struct ChatRoom {
     tokens: HashMap<Uuid, String>, // token to username
     users: HashSet<String>,
     password: Option<String>,
-    messages: Vec<ChatMessage>,
+    messages: Vec<ChatMessage>, // TODO: currently not using this but maybe later use it to show previous messages to late joiners
     broadcaster: broadcast::Sender<ChatMessage>,
 }
 
