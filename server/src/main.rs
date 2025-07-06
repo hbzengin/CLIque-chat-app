@@ -1,4 +1,4 @@
-mod protocol;
+use protocol;
 mod server;
 
 use dotenv::dotenv;
