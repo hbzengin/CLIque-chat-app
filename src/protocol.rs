@@ -19,6 +19,7 @@ pub enum ErrorCode {
     Unauthorized,
     InternalError,
     UserAlreadyInRoom,
+    UserAlreadyInAnotherRoom,
 }
 
 // Header shared by all

@@ -161,6 +161,7 @@ async fn handle_connection(
     state: Arc<Mutex<ChatServer>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut message_receiver: Option<broadcast::Receiver<ChatMessage>> = None;
+    let mut current_chat_id: Option<Uuid> = None;
 
     loop {
         tokio::select! {
@@ -186,13 +187,20 @@ async fn handle_connection(
                         .await?;
                     }
                     JoinChatRequest(r) => {
+                        if current_chat_id.is_some() {
+                            send_error(&mut socket, ErrorCode::UserAlreadyInAnotherRoom, "User already in another room!").await?;
+                            continue;
+                        }
+
                         let Some(chat) = server.chats.get_mut(&r.chat_id) else {
                             send_error(&mut socket, ErrorCode::ChatNotFound, "Chat not found").await?;
                             continue;
                         };
+
                         match chat.join(r.username, r.password) {
                             Ok((token, receiver)) => {
                                 message_receiver = Some(receiver);
+                                current_chat_id = Some(r.chat_id);
                                 send_response(&mut socket, JoinChatResponse(JoinChatResponse { token }))
                                     .await?;
                             }
