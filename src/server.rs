@@ -14,8 +14,8 @@ use tokio::{
 };
 
 use crate::protocol::{
-    read_message, write_message, ChatMessage, CreateChatResponse, ErrorCode, ErrorResponse,
-    JoinChatResponse, LeaveChatResponse, Packet,
+    read_message, write_message, ChatMessage, CreateChatResponse, DynError, ErrorCode,
+    ErrorResponse, JoinChatResponse, LeaveChatResponse, Packet,
     ProtocolMessage::{self, *},
     SendMessageResponse,
 };
@@ -27,16 +27,13 @@ fn gen_chat_id() -> Uuid {
     Uuid::new_v4()
 }
 
-fn hash_password(password: String) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+fn hash_password(password: String) -> Result<String, DynError> {
     let salt = SaltString::try_from_rng(&mut OsRng)?;
     let hash = Argon2::default().hash_password(password.as_bytes(), &salt)?;
     Ok(hash.to_string())
 }
 
-fn verify_password(
-    password: &str,
-    stored: &str,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn verify_password(password: &str, stored: &str) -> Result<(), DynError> {
     let parsed = PasswordHash::new(stored)?;
     Argon2::default().verify_password(password.as_bytes(), &parsed)?;
     Ok(())
@@ -137,7 +134,7 @@ impl ChatServer {
         }
     }
 
-    pub async fn run(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn run(self) -> Result<(), DynError> {
         let addr = format!("0.0.0.0:{}", self.port);
 
         let listener = TcpListener::bind(addr).await?;
@@ -159,7 +156,7 @@ impl ChatServer {
 async fn handle_connection(
     mut socket: tokio::net::TcpStream,
     state: Arc<Mutex<ChatServer>>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), DynError> {
     let mut message_receiver: Option<broadcast::Receiver<ChatMessage>> = None;
     let mut current_chat_id: Option<Uuid> = None;
 
@@ -266,11 +263,7 @@ async fn handle_connection(
     }
 }
 
-async fn send_error(
-    sock: &mut TcpStream,
-    code: ErrorCode,
-    msg: &str,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn send_error(sock: &mut TcpStream, code: ErrorCode, msg: &str) -> Result<(), DynError> {
     let pkt = Packet {
         version: 1,
         message: ErrorResponse(ErrorResponse {
@@ -282,10 +275,7 @@ async fn send_error(
     Ok(())
 }
 
-async fn send_response(
-    sock: &mut TcpStream,
-    m: ProtocolMessage,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn send_response(sock: &mut TcpStream, m: ProtocolMessage) -> Result<(), DynError> {
     let pkt = Packet {
         version: 1,
         message: m,

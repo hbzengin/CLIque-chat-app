@@ -3,6 +3,8 @@ use serde_json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
+pub type DynError = Box<dyn std::error::Error + Send + Sync>;
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ErrorResponse {
     pub code: ErrorCode,
@@ -108,9 +110,7 @@ pub struct LeaveChatRequest {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LeaveChatResponse {}
 
-pub async fn read_message<R: AsyncReadExt + Unpin>(
-    src: &mut R,
-) -> Result<Packet, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn read_message<R: AsyncReadExt + Unpin>(src: &mut R) -> Result<Packet, DynError> {
     let mut header_bytes = [0u8; 5];
     src.read_exact(&mut header_bytes).await?;
 
@@ -128,7 +128,7 @@ pub async fn read_message<R: AsyncReadExt + Unpin>(
 pub async fn write_message<W: AsyncWriteExt + Unpin>(
     dst: &mut W,
     packet: &Packet,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), DynError> {
     let body = serde_json::to_vec(&packet.message)?;
 
     let len: u32 = body.len() as u32;
