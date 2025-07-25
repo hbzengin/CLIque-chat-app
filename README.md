@@ -33,7 +33,7 @@ cargo run -p client 192.168.1.100 8080
 The client has a CLI for using chat rooms:
 
 ```bash
-# Create a new chat room (optionally password-protected)
+# Create a new chat room (optionally with password)
 /create
 /create room_password
 
@@ -52,3 +52,5 @@ Hello everyone!
 # Exit the application
 /exit
 ```
+
+**Note**: A running client instance can be part of at most one chat room at a time.
