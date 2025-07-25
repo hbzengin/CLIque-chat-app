@@ -1,4 +1,4 @@
-# Chat Application in Rust
+# CLI Chat Application in Rust
 
 This repo contains a real-time chat application in Rust built with a client-server architecture using TCP sockets and async handling. The app supports multiple chat rooms with optional passwords, very basic user authentication, and real-time message broadcasting. It is built on a custom messaging protocol for message passing between clients and server.
 
